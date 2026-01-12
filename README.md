@@ -7,7 +7,7 @@ Based on the paper:
 
 ## Features
 
-Based on algorithms from the paper:
+Based on the method from the paper:
 
 - **Binning-Aggregation**: Differentially private data binning followed by aggregation and privatization
 - **DP Linear Regression**: Bias-corrected weighted least squares with valid confidence intervals
