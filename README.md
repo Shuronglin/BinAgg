@@ -56,6 +56,8 @@ pip install binagg
 
 ## Quick Start
 
+For detailed tutorials, see the `examples/` folder, which includes both real data and simulated data examples.
+
 ### DP Linear Regression
 
 ```python
@@ -279,7 +281,7 @@ If you use this package, please cite:
 
 ## Contributors
 
-- [Shurong Lin](https://github.com/Shuronglin/) - Original algorithm implementation and paper author
+- [Shurong Lin](https://github.com/Shuronglin/) - Original algorithm implementation and paper author; package development and testing
 - [Soumojit Das](https://github.com/soumojitdas/) - Package development and testing
 - [Claude Code](https://claude.ai/claude-code) - AI assistant for packaging, testing, and documentation
 
