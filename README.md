@@ -70,7 +70,7 @@ true_beta = np.array([1.5, -2.0, 0.5])
 y = X @ true_beta + np.random.normal(0, 1, n)
 
 # Define public domain bounds (required for DP, must be specified by analyst)
-# These should be known a priori and NOT computed from the private data
+# These should be known a priori or privately computed from the sensitive data
 x_bounds = [(0, 10), (0, 10), (0, 10)]  # Known domain for each feature
 y_bounds = (-30, 30)  # Known range for target variable
 
@@ -117,6 +117,7 @@ from binagg import (
     mu_to_epsilon,
     epsilon_to_mu,
     delta_from_gdp,
+    mu_from_eps_delta,
     compose_gdp
 )
 
@@ -129,6 +130,10 @@ print(f"μ={mu} GDP ≈ ε={eps:.2f}")
 # Get δ for given μ and ε
 delta = delta_from_gdp(mu=1.0, eps=2.0)
 print(f"(μ=1.0, ε=2.0) → δ={delta:.6f}")
+
+# Convert (ε, δ)-DP to μ-GDP
+mu = mu_from_eps_delta(eps=1.0, delta=1e-5)
+print(f"(ε=1.0, δ=1e-5) → μ={mu:.2f}")
 
 # Compose multiple mechanisms
 total_mu = compose_gdp(0.5, 0.5, 0.5, 0.5)  # Four mechanisms
@@ -144,38 +149,52 @@ print(f"Composed privacy: μ={total_mu:.2f}")
 Performs differentially private linear regression with bias correction.
 
 **Parameters:**
-- `X`: Feature matrix (n, d)
-- `y`: Target vector (n,)
-- `x_bounds`: List of (lower, upper) tuples - public domain bounds for each feature (specified by analyst, not computed from data)
-- `y_bounds`: (lower, upper) tuple - public domain bounds for target variable
-- `mu`: Privacy budget in μ-GDP
-- `theta`: Splitting threshold (default: 0, negative = more bins)
-- `alpha`: Significance level for CI (default: 0.05)
-- `budget_ratios`: Privacy allocation (default: (1, 3, 3, 3))
-- `random_state`: Random seed
+- `X`: Feature matrix of shape (n, d)
+- `y`: Label vector of shape (n,)
+- `x_bounds`: Per-feature bounds as [(L_1, U_1), ..., (L_d, U_d)] - must be specified by analyst, not computed from data
+- `y_bounds`: Bounds on y as (y_min, y_max)
+- `mu`: Total privacy budget in μ-GDP
+- `theta`: PrivTree splitting threshold (default: 0)
+- `alpha`: Significance level for confidence intervals (default: 0.05 for 95% CI)
+- `budget_ratios`: Privacy budget ratios for (binning, count, sum_x, sum_y) (default: (1, 3, 3, 3))
+- `min_count`: Minimum noisy count to keep a bin (default: 2)
+- `clip`: Whether to clip input data to bounds (default: True)
+- `return_synthetic`: If True, also return synthetic data using the same privacy budget (default: False)
+- `clip_synthetic_output`: Whether to clip synthetic output to bounds, only used when return_synthetic=True (default: False)
+- `preserve_sample_size`: If True, rescale noisy counts so total equals original sample size n (default: True)
+- `random_state`: Random seed for reproducibility
 
-**Returns:** `DPRegressionResult` with:
-- `coefficients`: Bias-corrected estimates
-- `standard_errors`: Sandwich estimator SEs
-- `confidence_intervals`: Valid asymptotic CIs
-- `n_bins`: Number of bins used
+**Returns:**
+- If `return_synthetic=False`: `DPRegressionResult` with coefficients, standard_errors, confidence_intervals, n_bins
+- If `return_synthetic=True`: Tuple of (`DPRegressionResult`, `SyntheticDataResult`) - both share the same privacy budget
 
 #### `generate_synthetic_data(X, y, x_bounds, y_bounds, mu, ...)`
 
-Generates differentially private synthetic data.
+Generates differentially private synthetic data that preserves the joint (X, y) distribution.
 
 **Parameters:**
-- Same as `dp_linear_regression`, plus:
-- `clip_output`: Whether to clip to bounds (default: True)
+- `X`: Feature matrix of shape (n, d)
+- `y`: Label vector of shape (n,)
+- `x_bounds`: Per-feature bounds as [(L_1, U_1), ..., (L_d, U_d)]
+- `y_bounds`: Bounds on y as (y_min, y_max)
+- `mu`: Total privacy budget in μ-GDP
+- `theta`: PrivTree splitting threshold (default: 0)
+- `budget_ratios`: Privacy budget ratios for (binning, count, sum_x, sum_y) (default: (1, 3, 3, 3))
+- `min_count`: Minimum noisy count to generate samples from a bin (default: 2)
+- `clip`: Whether to clip input data to bounds (default: True)
+- `clip_output`: Whether to clip synthetic output data to bounds (default: False)
+- `preserve_sample_size`: If True, rescale noisy counts so total synthetic samples equals original n (default: True)
+- `random_state`: Random seed for reproducibility
 
 **Returns:** `SyntheticDataResult` with:
 - `X_synthetic`: Synthetic features
 - `y_synthetic`: Synthetic targets
 - `n_samples`: Number of samples generated
+- `n_bins_used`: Number of bins used for generation
 
 #### `privtree_binning(X, y, x_bounds, mu_bin, ...)`
 
-Low-level binning using PrivTree algorithm.
+Private binning using PrivTree algorithm.
 
 #### `privatize_aggregates(bin_result, y_bound, mu_agg, ...)`
 
@@ -194,10 +213,12 @@ Add calibrated noise to bin aggregates.
 
 ### μ-GDP (Gaussian Differential Privacy)
 
-This package uses μ-GDP for privacy accounting:
-- **μ = 1.0**: Moderate privacy (recommended starting point)
-- **μ < 0.5**: Strong privacy (more noise, less accuracy)
-- **μ > 2.0**: Weak privacy (less noise, more accuracy)
+This package uses μ-GDP for privacy accounting. Smaller values of μ correspond to stronger privacy guarantees.
+
+- **μ ≤ 0.5**: Strong privacy protection (higher noise, lower accuracy)  
+- **0.5 < μ ≤ 1.5**: Moderate privacy protection  
+- **μ > 1.5**: Weaker privacy protection (lower noise, higher accuracy)
+
 
 ### Converting to (ε, δ)-DP
 
@@ -227,7 +248,7 @@ See the `examples/` directory for complete tutorials:
 
 - `basic_regression.py`: Simple DP regression example
 - `synthetic_data.py`: Generating and using synthetic data
-- `privacy_composition.py`: Understanding privacy budgets
+- `privacy_accounting.py`: Understanding privacy budgets
 - `real_data_example.py`: Working with real datasets
 
 ## Testing
@@ -250,7 +271,7 @@ If you use this package, please cite:
 ```bibtex
 @article{lin2025differentially,
   title={Differentially Private Linear Regression and Synthetic Data Generation with Statistical Guarantees},
-  author={Lin, Shuang and Slavkovi{\'c}, Aleksandra and Bhoomireddy, Deepak Raj},
+  author={Lin, Shurong and Slavkovi{\'c}, Aleksandra and Bhoomireddy, Deekshith Reddy},
   journal={arXiv preprint arXiv:2510.16974},
   year={2025}
 }
@@ -259,6 +280,7 @@ If you use this package, please cite:
 ## Contributors
 
 - [Shurong Lin](https://github.com/Shuronglin/) - Original algorithm implementation and paper author
+- [Soumojit Das](https://github.com/soumojitdas/) - Package development and testing
 - [Claude Code](https://claude.ai/claude-code) - AI assistant for packaging, testing, and documentation
 
 ## License
