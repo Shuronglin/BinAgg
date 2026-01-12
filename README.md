@@ -116,24 +116,21 @@ y_syn = syn_result.y_synthetic
 
 ```python
 from binagg import (
-    mu_to_epsilon,
-    epsilon_to_mu,
     delta_from_gdp,
+    eps_from_mu_delta,
     mu_from_eps_delta,
     compose_gdp
 )
 
-# Convert μ-GDP to (ε, δ)-DP
-mu = 1.0
-delta = 1e-5
-eps = mu_to_epsilon(mu)
-print(f"μ={mu} GDP ≈ ε={eps:.2f}")
-
-# Get δ for given μ and ε
+# μ-GDP to (ε, δ)-DP: given μ and ε, compute δ
 delta = delta_from_gdp(mu=1.0, eps=2.0)
 print(f"(μ=1.0, ε=2.0) → δ={delta:.6f}")
 
-# Convert (ε, δ)-DP to μ-GDP
+# μ-GDP to (ε, δ)-DP: given μ and δ, compute ε
+eps = eps_from_mu_delta(mu=1.0, delta=1e-5)
+print(f"(μ=1.0, δ=1e-5) → ε={eps:.2f}")
+
+# (ε, δ)-DP to μ-GDP
 mu = mu_from_eps_delta(eps=1.0, delta=1e-5)
 print(f"(ε=1.0, δ=1e-5) → μ={mu:.2f}")
 
@@ -204,10 +201,9 @@ Add calibrated noise to bin aggregates.
 
 ### Privacy Functions
 
-- `mu_to_epsilon(mu)`: Convert μ-GDP to ε
-- `epsilon_to_mu(eps)`: Convert ε to μ-GDP
-- `delta_from_gdp(mu, eps)`: Get δ for (μ, ε)
-- `mu_from_eps_delta(eps, delta)`: Get μ from (ε, δ)
+- `delta_from_gdp(mu, eps)`: μ-GDP → (ε, δ)-DP, compute δ given μ and ε
+- `eps_from_mu_delta(mu, delta)`: μ-GDP → (ε, δ)-DP, compute ε given μ and δ
+- `mu_from_eps_delta(eps, delta)`: (ε, δ)-DP → μ-GDP
 - `compose_gdp(*mus)`: Compose multiple μ-GDP mechanisms
 - `allocate_budget(total_mu, ratios)`: Split budget by ratios
 
