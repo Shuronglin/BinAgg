@@ -1,0 +1,50 @@
+# =============================================================================
+# Ignore everything by default
+# =============================================================================
+*
+
+# =============================================================================
+# Whitelist: Include these files and folders
+# =============================================================================
+
+# Root files
+!.gitignore
+!README.md
+!pyproject.toml
+!LICENSE
+
+# Source code
+!src/
+!src/**
+
+# Tests
+!tests/
+!tests/**
+
+# Examples
+!examples/
+!examples/**
+
+# =============================================================================
+# Re-exclude unwanted files within whitelisted folders
+# =============================================================================
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Jupyter checkpoints
+.ipynb_checkpoints/
+
+# OS files
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
+
+# Build artifacts
+*.egg-info/
+build/
+dist/
