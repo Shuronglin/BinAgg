@@ -1,6 +1,10 @@
+Last updated on March 1, 2026.
+
 # BinAgg: Differentially Private Linear Regression
 
-A Python package for differentially private linear regression and synthetic data generation using the Binning-Aggregation framework with Gaussian Differential Privacy (GDP).
+A Python package for differentially private linear regression and synthetic data generation using the Binning-Aggregation framework under Gaussian differential privacy (GDP).
+
+This package implements the algorithms from the paper and may be expanded with additional functionality in the near future. Please use the command below to obtain the latest version.
 
 Based on the paper:
 > Lin, S., Slavković, A., & Bhoomireddy, D. R. (2026). "Differentially Private Linear Regression and Synthetic Data Generation with Statistical Guarantees." arXiv:2510.16974v1: https://arxiv.org/pdf/2510.16974. Accepcted to AISTATS 2026.
