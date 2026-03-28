@@ -3,7 +3,7 @@
 A Python package for differentially private linear regression and synthetic data generation using the Binning-Aggregation framework with Gaussian Differential Privacy (GDP).
 
 Based on the paper:
-> Lin, S., Slavković, A., & Bhoomireddy, D. R. (2025). "Differentially Private Linear Regression and Synthetic Data Generation with Statistical Guarantees." arXiv:2510.16974v1: https://arxiv.org/pdf/2510.16974
+> Lin, S., Slavković, A., & Bhoomireddy, D. R. (2026). "Differentially Private Linear Regression and Synthetic Data Generation with Statistical Guarantees." arXiv:2510.16974v1: https://arxiv.org/pdf/2510.16974. Accepcted to AISTATS 2026.
 
 ## Features
 
@@ -270,8 +270,8 @@ If you use this package, please cite:
 @article{lin2025differentially,
   title={Differentially Private Linear Regression and Synthetic Data Generation with Statistical Guarantees},
   author={Lin, Shurong and Slavkovi{\'c}, Aleksandra and Bhoomireddy, Deekshith Reddy},
-  journal={arXiv preprint arXiv:2510.16974},
-  year={2025}
+  journal={International Conference on Artificial Intelligence and Statistics (AISTATS)},
+  year={2026}
 }
 ```
 
