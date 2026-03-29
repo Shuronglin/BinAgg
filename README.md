@@ -9,7 +9,6 @@ This package implements the algorithms from the paper and may be expanded with a
 Based on the paper:
 > Lin, S., Slavković, A., & Bhoomireddy, D. R. (2026). "Differentially Private Linear Regression and Synthetic Data Generation with Statistical Guarantees." arXiv:2510.16974v1: https://arxiv.org/pdf/2510.16974. Accepcted to AISTATS 2026.
 
-P.S. This repository mainly provides the package implementation. The experiments reported in the paper are maintained separately by the third author at: https://github.com/Dee-1862/BinAgg. 
 
 ## Features
 
