@@ -283,7 +283,6 @@ pytest tests/ --cov=binagg
 ## Contributors
 
 - [Shurong Lin](https://github.com/Shuronglin/) - Original algorithm implementation and paper author; package development and testing
-- [Claude Code](https://claude.ai/claude-code) - AI assistant for packaging, testing, and documentation
 
 ## License
 
