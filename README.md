@@ -6,9 +6,22 @@ A Python package for differentially private linear regression and synthetic data
 
 This package implements the algorithms from the paper and may be expanded with additional functionality in the near future. Please use the command below to obtain the latest version.
 
-Based on the paper:
-> Lin, S., Slavković, A., & Bhoomireddy, D. R. (2026). "Differentially Private Linear Regression and Synthetic Data Generation with Statistical Guarantees." arXiv:2510.16974v1: https://arxiv.org/pdf/2510.16974. Accepcted to AISTATS 2026.
+## Citation
+It is based on the paper:
+> Lin, S., Slavković, A., & Bhoomireddy, D. R. (2026). Differentially private linear regression and synthetic data generation with statistical guarantees. In Proceedings of the 29th International Conference on Artificial Intelligence and Statistics (AISTATS). Proceedings of Machine Learning Research.
 
+If you use this package, please cite:
+
+```bibtex
+@inproceedings{lin2026differentially,
+  title     = {Differentially Private Linear Regression and Synthetic Data Generation with Statistical Guarantees},
+  author    = {Lin, Shurong and Slavkovi{\'c}, Aleksandra and Bhoomireddy, Deekshith Reddy},
+  booktitle = {Proceedings of the 29th International Conference on Artificial Intelligence and Statistics},
+  series    = {Proceedings of Machine Learning Research},
+  year      = {2026},
+  publisher = {PMLR}
+}
+```
 
 ## Features
 
@@ -267,23 +280,9 @@ pytest tests/test_regression.py -v
 pytest tests/ --cov=binagg
 ```
 
-## Citation
-
-If you use this package, please cite:
-
-```bibtex
-@article{lin2025differentially,
-  title={Differentially Private Linear Regression and Synthetic Data Generation with Statistical Guarantees},
-  author={Lin, Shurong and Slavkovi{\'c}, Aleksandra and Bhoomireddy, Deekshith Reddy},
-  journal={International Conference on Artificial Intelligence and Statistics (AISTATS)},
-  year={2026}
-}
-```
-
 ## Contributors
 
 - [Shurong Lin](https://github.com/Shuronglin/) - Original algorithm implementation and paper author; package development and testing
-- [Soumojit Das](https://github.com/soumojitdas/) - Package development and testing
 - [Claude Code](https://claude.ai/claude-code) - AI assistant for packaging, testing, and documentation
 
 ## License
