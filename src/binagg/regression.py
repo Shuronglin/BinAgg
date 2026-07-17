@@ -8,6 +8,12 @@ Reference:
     Lin, S., Slavković, A., & Bhoomireddy, D. R. (2025).
     "Differentially Private Linear Regression and Synthetic Data Generation
     with Statistical Guarantees." arXiv:2510.16974v1
+
+The full sandwich covariance Σ̃ is retained and exposed on
+DPRegressionResult.covariance_matrix, which the DP Wald tests in binagg.testing
+consume for joint linear hypotheses. Coefficients, standard errors, and CIs are
+unchanged, except that a degenerate negative sandwich variance yields se = 0
+(clamped) rather than NaN.
 """
 
 from __future__ import annotations
@@ -57,6 +63,11 @@ class DPRegressionResult:
         Significance level used for confidence intervals.
     privacy_budget : float
         Total μ-GDP budget used.
+    covariance_matrix : np.ndarray, optional
+        Full sandwich covariance Σ̃ = M̃⁻¹ H̃ M̃⁻¹ of the bias-corrected estimator
+        (Theorem 4.2). Shape: (d, d). Symmetric; may be non-PSD under privacy noise.
+        Required for joint Wald tests (see binagg.testing). Defaults to None for
+        backward compatibility with results constructed without it.
     """
 
     coefficients: np.ndarray
@@ -68,6 +79,7 @@ class DPRegressionResult:
     n_samples_original: int
     alpha: float
     privacy_budget: float
+    covariance_matrix: Optional[np.ndarray] = None
 
 
 def dp_linear_regression(
@@ -243,7 +255,8 @@ def _compute_dp_wls(
     Returns
     -------
     tuple
-        (beta_dp, beta_naive, se_dp, se_naive)
+        (beta_dp, beta_naive, Sigma_dp, se_naive) where Sigma_dp is the full
+        (d, d) sandwich covariance of the bias-corrected estimator.
     """
     K = priv_agg.n_bins
     d = n_features
@@ -280,8 +293,8 @@ def _compute_dp_wls(
     except np.linalg.LinAlgError:
         beta_naive = inv(StWS + 1e-6 * np.eye(d)) @ StWt
 
-    # Compute sandwich covariance estimator for bias-corrected estimator
-    se_dp = _compute_sandwich_se(
+    # Full sandwich covariance for the bias-corrected estimator (Theorem 4.2)
+    Sigma_dp = _compute_sandwich_cov(
         tilde_S, tilde_t, tilde_W, beta_dp, D_k_list, D, K, d
     )
 
@@ -289,14 +302,14 @@ def _compute_dp_wls(
     try:
         # Using σ² = 1 as placeholder (proper estimation would need residuals)
         Sigma_naive = inv(StWS)
-        se_naive = np.sqrt(np.diag(Sigma_naive))
+        se_naive = np.sqrt(np.maximum(np.diag(Sigma_naive), 0.0))
     except np.linalg.LinAlgError:
         se_naive = np.full(d, np.nan)
 
-    return beta_dp, beta_naive, se_dp, se_naive
+    return beta_dp, beta_naive, Sigma_dp, se_naive
 
 
-def _compute_sandwich_se(
+def _compute_sandwich_cov(
     tilde_S: np.ndarray,
     tilde_t: np.ndarray,
     tilde_W: np.ndarray,
@@ -307,46 +320,50 @@ def _compute_sandwich_se(
     d: int,
 ) -> np.ndarray:
     """
-    Compute standard errors using the sandwich covariance estimator.
+    Full sandwich covariance Σ̃ = M̃⁻¹ H̃ M̃⁻¹ consistent with Theorem 4.2.
 
-    From Theorem 4.2:
-        Σ̃ = M̃⁻¹ H̃ M̃⁻¹
-
-    where:
         M̃ = (1/K)(S̃ᵀW̃S̃) - D̃
-        H̃ = (1/(K(K-d))) Σ_k Q̃_k Q̃_kᵀ
         Q̃_k = s̃_k w̃_k (t̃_k - s̃_kᵀβ̃) + w̃_k D_k β̃
+        H̃ = (1/(K(K-d))) Σ_k Q̃_k Q̃_kᵀ
+
+    Returns the (d, d) matrix (symmetrized), or an all-NaN matrix when M̃ is
+    singular. Standard errors are the sqrt of its clamped diagonal.
     """
-    # Compute M̃
-    StWS = tilde_S.T @ tilde_W @ tilde_S
+    S = np.asarray(tilde_S, dtype=float)
+    t = np.asarray(tilde_t, dtype=float).reshape(-1)
+    W = np.asarray(tilde_W, dtype=float)
+    beta = np.asarray(beta, dtype=float).reshape(-1)
+    D = np.asarray(D, dtype=float)
+
+    # M̃
+    StWS = S.T @ W @ S
     M_tilde = StWS / K - D
 
-    # Compute Q_k for each bin
-    Q_list = []
+    # Q_k for each bin
+    Q = np.zeros((K, d), dtype=float)
     for k in range(K):
-        s_k = tilde_S[k, :]  # (d,)
-        w_k = tilde_W[k, k]  # scalar
-        t_k = tilde_t[k]  # scalar
-        D_k = D_k_list[k]  # (d, d)
+        s_k = S[k, :]
+        w_k = float(W[k, k])
+        t_k = float(t[k])
+        D_k = np.asarray(D_k_list[k], dtype=float)
 
-        residual = t_k - s_k @ beta
-        Q_k = s_k * w_k * residual + w_k * (D_k @ beta)
-        Q_list.append(Q_k)
+        resid = t_k - s_k @ beta
+        Q[k, :] = s_k * (w_k * resid) + w_k * (D_k @ beta)
 
-    # Compute H̃
-    Q_array = np.array(Q_list)  # (K, d)
+    # H̃
     denom = K * max(K - d, 1)  # Avoid division by zero
-    H_tilde = (Q_array.T @ Q_array) / denom
+    H_tilde = (Q.T @ Q) / denom
 
-    # Compute Σ̃ = M̃⁻¹ H̃ M̃⁻¹
+    # Σ̃ = M̃⁻¹ H̃ M̃⁻¹
     try:
         M_inv = inv(M_tilde)
-        Sigma_tilde = M_inv @ H_tilde @ M_inv
-        se = np.sqrt(np.diag(Sigma_tilde))
+        Sigma = M_inv @ H_tilde @ M_inv
     except np.linalg.LinAlgError:
-        se = np.full(d, np.nan)
+        return np.full((d, d), np.nan, dtype=float)
 
-    return se
+    # Symmetrize (numerical hygiene)
+    Sigma = 0.5 * (Sigma + Sigma.T)
+    return Sigma
 
 
 def dp_regression_from_aggregates(
@@ -378,9 +395,12 @@ def dp_regression_from_aggregates(
     Returns
     -------
     DPRegressionResult
-        Regression results.
+        Regression results, including the full covariance matrix.
     """
-    beta_dp, beta_naive, se_dp, se_naive = _compute_dp_wls(priv_agg, n_features)
+    beta_dp, beta_naive, Sigma_dp, se_naive = _compute_dp_wls(priv_agg, n_features)
+
+    # Standard errors = sqrt of the clamped diagonal of Σ̃ (behavior unchanged).
+    se_dp = np.sqrt(np.maximum(np.diag(Sigma_dp), 0.0))
 
     K = priv_agg.n_bins
     z_crit = norm.ppf(1 - alpha / 2)
@@ -402,4 +422,5 @@ def dp_regression_from_aggregates(
         n_samples_original=n_samples_original,
         alpha=alpha,
         privacy_budget=mu,
+        covariance_matrix=np.asarray(Sigma_dp, dtype=float),
     )
