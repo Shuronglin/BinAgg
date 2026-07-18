@@ -1,4 +1,4 @@
-Last updated on March 1, 2026.
+Last updated on July 17, 2026.
 
 # BinAgg: Differentially Private Linear Regression
 
@@ -25,12 +25,14 @@ If you use this package, please cite:
 
 ## Features
 
-Based on the method from the paper:
+Based on the Binning-Aggregation method from the paper -- differentially private data binning
+followed by aggregation and privatization -- the package provides three components:
 
-- **Binning-Aggregation**: Differentially private data binning followed by aggregation and privatization
-- **DP Linear Regression**: Bias-corrected weighted least squares with valid confidence intervals
-- **DP Synthetic Data Generation**: Generate privacy-preserving synthetic datasets
-- **GDP Privacy Accounting**: Tight composition using Gaussian Differential Privacy
+- **DP Linear Regression**: bias-corrected estimator with asymptotic confidence intervals (computed on demand).
+- **DP Hypothesis Testing**: Wald tests for linear hypotheses (coordinate-wise and joint), available two ways -- (1) as post-processing of a DP linear-regression release, at **no additional privacy cost**; (2) as a standalone `dp_wald_test` (its own independent release) for those who want to skip estimation.
+- **DP Synthetic Data Generation**: generate privacy-preserving synthetic datasets, optionally bundling the linear-regression estimate (and hence hypothesis testing) from the same release.
+
+
 
 ## Installation
 
@@ -98,37 +100,112 @@ y_bounds = (-30, 30)  # Known range for target variable
 result = dp_linear_regression(
     X, y, x_bounds, y_bounds,
     mu=1.0,           # Privacy budget (μ-GDP)
-    alpha=0.05,       # 95% confidence intervals
     random_state=42
 )
 
 # Results
 print("Coefficients:", result.coefficients)
 print("Standard Errors:", result.standard_errors)
-print("95% CI:", result.confidence_intervals)
+print("95% CI:", result.confidence_intervals())
 print(f"Number of bins: {result.n_bins}")
 ```
 
+### One private release, many analyses (one-time privacy cost)
+
+`dp_linear_regression` performs a **single** differentially private release. The result is the
+hub: estimation, confidence intervals, and hypothesis testing are all derived from it by
+**post-processing**, so together they cost only the `mu` you already spent -- nothing extra.
+
+```python
+from binagg import dp_linear_regression, make_linear_hypothesis
+
+feature_names = ["x1", "x2", "x3"]                 # same order as the columns of X
+release = dp_linear_regression(X, y, x_bounds, y_bounds, mu=1.0)   # spends mu ONCE
+
+# 1) Estimation + confidence intervals (any alpha, on demand)
+print(release.coefficients, release.confidence_intervals(alpha=0.05))
+
+# 2) Hypothesis testing -- free, run as many as you like
+R, r = make_linear_hypothesis(feature_names, ["x3"], null_values=0.0)
+print(release.wald_test(R, r))          # method form; same as wald_test(release, R, r)
+```
+
+Every analysis after the fit reads only the released `(coefficients, covariance_matrix)`, so the
+**total privacy cost stays `mu`** no matter how many CIs or tests you compute. Synthetic data is a
+**separate** release (see below) -- a regression release holds only bin-level aggregates, not
+record-level data, so it cannot yield real synthetic records.
+
+### Producing results individually (separate releases)
+
+The one-shot helpers each perform their **own** independent DP release, spending their **own**
+`mu`. Independent releases compose -- k releases at `mu` cost `sqrt(k)*mu` overall -- so reach
+for these only when you want a single self-contained call, not alongside a release you already
+have.
+
+```python
+from binagg import dp_wald_test, generate_synthetic_data, compose_gdp
+
+t = dp_wald_test(X, y, x_bounds=x_bounds, y_bounds=y_bounds, mu=1.0, R=R, r=r)   # own release
+s = generate_synthetic_data(X, y, x_bounds, y_bounds, mu=1.0)                     # own release
+print("cost of using two independent mu=1 releases:", compose_gdp(1.0, 1.0))     # sqrt(2)
+```
+
+| How you get results | Privacy cost | Use when |
+|---|---|---|
+| `dp_linear_regression(...)` then `confidence_intervals` / `wald_test` | one `mu` total (post-processing) | estimates + CIs + tests from one budget |
+| `generate_synthetic_data(..., return_regression=True)` | one `mu` (shared noise) | estimates + tests + *per-sample* synthetic from one release |
+| `dp_wald_test(...)` | its own `mu` | self-contained fit-and-test, nothing else released |
+| `generate_synthetic_data(...)` | its own `mu` | self-contained synthetic data, nothing else released |
+
+### DP Hypothesis Testing
+
+A hypothesis is any linear restriction H0: R beta = r. `R` is a q x d matrix (each row is one
+restriction on the d coefficients, in the column order of `X`) and `r` the length-q target
+vector. Build it with `make_linear_hypothesis`, or by hand for arbitrary contrasts. The test
+reuses the release, so it costs no extra privacy budget.
+
+```python
+import numpy as np
+from binagg import make_linear_hypothesis, wald_test
+
+# Helper: restrict named coefficients to values
+R, r = make_linear_hypothesis(feature_names, ["x3"], null_values=0.0)       # H0: x3 = 0
+print(wald_test(release, R, r, alpha=0.05))
+
+R, r = make_linear_hypothesis(feature_names, ["x2", "x3"], null_values=0.0) # joint H0: x2=x3=0
+print(wald_test(release, R, r))
+
+# Hand-built R, r: ANY linear hypothesis
+print(wald_test(release, np.array([[1.0, -1.0, 0.0]]), np.array([0.0])))    # H0: x1 = x2
+print(wald_test(release, np.array([[2.0, 0.0, 1.0]]), np.array([3.0])))     # H0: 2*x1 + x3 = 3
+```
+
+`wald_test` (and the `release.wald_test` method) return a `WaldTestResult` with `.statistic`,
+`.df`, `.pvalue`, `.reject`, and a `.valid` flag. If the private fit is rank-deficient (too few
+bins for the number of coefficients) or the tested covariance is ill-conditioned, `.valid` is
+`False` and `.reject` is `None` -- the test abstains instead of returning an unreliable p-value.
+
 ### DP Synthetic Data Generation
+
+Synthetic data uses a **record-level** noise mechanism (per-sample noise), distinct from the
+aggregate-level release used for regression -- so it comes from its own call, which can also
+bundle the regression:
 
 ```python
 from binagg import generate_synthetic_data
 
-# Generate synthetic data
-syn_result = generate_synthetic_data(
-    X, y, x_bounds, y_bounds,
-    mu=1.0,
-    random_state=42
-)
+# (a) Synthetic only -- its own mu-GDP release
+syn = generate_synthetic_data(X, y, x_bounds, y_bounds, mu=1.0)
 
-print(f"Generated {syn_result.n_samples} synthetic samples")
-print(f"Synthetic X shape: {syn_result.X_synthetic.shape}")
-print(f"Synthetic y shape: {syn_result.y_synthetic.shape}")
+# (b) Synthetic + regression (+ testing) from ONE shared release (one mu, Corollary 3.1)
+syn, result = generate_synthetic_data(X, y, x_bounds, y_bounds, mu=1.0, return_regression=True)
+# `result` then supports result.confidence_intervals(...) and result.wald_test(...)
 
-# Use synthetic data for downstream analysis
-X_syn = syn_result.X_synthetic
-y_syn = syn_result.y_synthetic
+print(f"Synthetic X shape: {syn.X_synthetic.shape}, y shape: {syn.y_synthetic.shape}")
 ```
+
+Use `return_regression=True` when you want the regression (with CIs and Wald tests) **and**
+per-sample synthetic data from a single privacy budget.
 
 ### Privacy Budget Conversion
 
@@ -172,22 +249,17 @@ Performs differentially private linear regression with bias correction.
 - `y_bounds`: Bounds on y as (y_min, y_max)
 - `mu`: Total privacy budget in μ-GDP
 - `theta`: PrivTree splitting threshold (default: 0)
-- `alpha`: Significance level for confidence intervals (default: 0.05 for 95% CI)
 - `budget_ratios`: Privacy budget ratios for (binning, count, sum_x, sum_y) (default: (1, 3, 3, 3))
 - `min_count`: Minimum noisy count to keep a bin (default: 2)
 - `clip`: Whether to clip input data to bounds (default: True)
-- `return_synthetic`: If True, also return synthetic data using the same privacy budget (default: False)
-- `clip_synthetic_output`: Whether to clip synthetic output to bounds, only used when return_synthetic=True (default: False)
 - `preserve_sample_size`: If True, rescale noisy counts so total equals original sample size n (default: True)
 - `random_state`: Random seed for reproducibility
 
-**Returns:**
-- If `return_synthetic=False`: `DPRegressionResult` with coefficients, standard_errors, confidence_intervals, n_bins
-- If `return_synthetic=True`: Tuple of (`DPRegressionResult`, `SyntheticDataResult`) - both share the same privacy budget
+**Returns:** `DPRegressionResult` with coefficients, standard_errors, covariance_matrix, aggregates, n_bins. Confidence intervals are on-demand via `result.confidence_intervals(alpha)`; hypothesis tests via `result.wald_test(R, r)` / `wald_test`.
 
 #### `generate_synthetic_data(X, y, x_bounds, y_bounds, mu, ...)`
 
-Generates differentially private synthetic data that preserves the joint (X, y) distribution.
+Generates differentially private synthetic data that preserves the joint (X, y) distribution. Performs its OWN independent mu-GDP release. With `return_regression=True` it also returns the `DPRegressionResult` from the SAME release, giving synthetic data + estimation + testing at one mu.
 
 **Parameters:**
 - `X`: Feature matrix of shape (n, d)
@@ -202,8 +274,9 @@ Generates differentially private synthetic data that preserves the joint (X, y) 
 - `clip_output`: Whether to clip synthetic output data to bounds (default: False)
 - `preserve_sample_size`: If True, rescale noisy counts so total synthetic samples equals original n (default: True)
 - `random_state`: Random seed for reproducibility
+- `return_regression`: If True, also return the shared-release `DPRegressionResult` (default: False)
 
-**Returns:** `SyntheticDataResult` with:
+**Returns:** `SyntheticDataResult` (or `(SyntheticDataResult, DPRegressionResult)` when `return_regression=True`) with:
 - `X_synthetic`: Synthetic features
 - `y_synthetic`: Synthetic targets
 - `n_samples`: Number of samples generated
@@ -216,6 +289,27 @@ Private binning using PrivTree algorithm.
 #### `privatize_aggregates(bin_result, y_bound, mu_agg, ...)`
 
 Add calibrated noise to bin aggregates.
+
+#### `make_linear_hypothesis(feature_names, tested_terms, null_values=0.0)`
+
+Builds the restriction matrix `R` and target vector `r` for H0: R beta = r, restricting the named `tested_terms` to `null_values` (a scalar, a per-term list, or a `{term: value}` dict). Returns `(R, r)`. For hypotheses the helper cannot express (e.g. `beta_1 = beta_2`), build `R` and `r` directly and pass them to `wald_test`.
+
+#### `wald_test(result, R, r, alpha=0.05, ...)`
+
+Wald test of H0: R beta = r on a fitted `DPRegressionResult`, using its `covariance_matrix`. Pure post-processing — no additional privacy budget. Returns a `WaldTestResult` with `statistic`, `df`, `pvalue`, `reject`, and `valid` (`False`, with `reject=None`, when the fit is rank-deficient or the tested covariance is ill-conditioned).
+
+#### `dp_wald_test(X, y, x_bounds, y_bounds, mu, R, r, ...)`
+
+Convenience wrapper that performs its OWN independent mu-GDP release (its own fit) and tests it. This is a SEPARATE release from any other call and composes with them (sqrt(k)*mu). To reuse one release for estimation and many tests at no extra cost, call `dp_linear_regression` once and use `wald_test` / `result.wald_test`.
+
+#### `DPRegressionResult` release-hub members
+
+A fitted result carries the private release and exposes post-processing analyses at no extra
+privacy cost:
+
+- `.aggregates`: the stored private release (noisy bin aggregates).
+- `.confidence_intervals(alpha=0.05)`: asymptotic CIs, computed on demand (any alpha).
+- `.wald_test(R, r, alpha=0.05)`: Wald test on this release (same as `wald_test(result, R, r)`).
 
 ### Privacy Functions
 

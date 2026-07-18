@@ -294,8 +294,15 @@ def dp_wald_test(
     """
     One-call convenience: fit BinAgg regression then Wald-test H0: R β = r.
 
-    Equivalent to ``wald_test(dp_linear_regression(...), R, r)``. The entire
-    procedure (estimation + test) satisfies μ-GDP; the test itself adds no cost.
+    Performs its OWN independent μ-GDP release (its own fit, spending μ) and tests
+    it. This is a SEPARATE release from any other dp_linear_regression/dp_wald_test
+    call: independent releases compose as sqrt(sum of squares), e.g. two μ=1 releases
+    cost μ=√2 overall (see compose_gdp). Within this single release the test itself is
+    post-processing and adds no cost.
+
+    Use this only when you want a self-contained fit-and-test. To reuse one release
+    for estimation AND any number of tests at no extra cost, call
+    dp_linear_regression once and use wald_test(result, ...) (or result.wald_test).
     See :func:`dp_linear_regression` for the fitting parameters.
     """
     result = dp_linear_regression(
@@ -305,7 +312,6 @@ def dp_wald_test(
         y_bounds=y_bounds,
         mu=mu,
         theta=theta,
-        alpha=alpha,
         budget_ratios=budget_ratios,
         min_count=min_count,
         clip=clip,
