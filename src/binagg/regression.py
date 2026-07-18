@@ -18,8 +18,8 @@ unchanged, except that a degenerate negative sandwich variance yields se = 0
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, List, Optional, Tuple, Union
+from dataclasses import dataclass, field
+from typing import List, Optional, Tuple
 
 import numpy as np
 from numpy.linalg import inv
@@ -34,9 +34,6 @@ from binagg.binning import (
 from binagg.privacy import allocate_budget
 from binagg.utils import clip_data
 
-if TYPE_CHECKING:
-    from binagg.synthetic import SyntheticDataResult
-
 
 @dataclass
 class DPRegressionResult:
@@ -49,8 +46,6 @@ class DPRegressionResult:
         Bias-corrected DP coefficient estimates β̃. Shape: (d,).
     standard_errors : np.ndarray
         Standard errors from sandwich estimator. Shape: (d,).
-    confidence_intervals : np.ndarray
-        Confidence intervals for each coefficient. Shape: (d, 2).
     naive_coefficients : np.ndarray
         Naive WLS estimates without bias correction. Shape: (d,).
     naive_standard_errors : np.ndarray
@@ -59,8 +54,6 @@ class DPRegressionResult:
         Number of bins used (after filtering).
     n_samples_original : int
         Original number of samples.
-    alpha : float
-        Significance level used for confidence intervals.
     privacy_budget : float
         Total μ-GDP budget used.
     covariance_matrix : np.ndarray, optional
@@ -68,18 +61,60 @@ class DPRegressionResult:
         (Theorem 4.2). Shape: (d, d). Symmetric; may be non-PSD under privacy noise.
         Required for joint Wald tests (see binagg.testing). Defaults to None for
         backward compatibility with results constructed without it.
+    aggregates : PrivatizedAggregates, optional
+        The private release (noisy bin aggregates) this result was computed from.
+        Stored so that hypothesis testing, synthetic data, and diagnostics can all
+        be derived from the SAME release as post-processing, at no additional
+        privacy cost. These are already-DP quantities, so storing them is safe.
+        Defaults to None for results constructed without it.
+
+    Inference is on-demand post-processing (no privacy cost; no significance level is
+    baked into the fit): call ``confidence_intervals(alpha)`` for CIs and
+    ``wald_test(R, r, alpha)`` for hypothesis tests.
     """
 
     coefficients: np.ndarray
     standard_errors: np.ndarray
-    confidence_intervals: np.ndarray
     naive_coefficients: np.ndarray
     naive_standard_errors: np.ndarray
     n_bins: int
     n_samples_original: int
-    alpha: float
     privacy_budget: float
     covariance_matrix: Optional[np.ndarray] = None
+    aggregates: Optional[PrivatizedAggregates] = field(default=None, repr=False)
+
+    def wald_test(
+        self,
+        R,
+        r,
+        *,
+        alpha: float = 0.05,
+        min_excess_bins: int = 1,
+        cond_threshold: float = 1e10,
+    ):
+        """Wald test of H0: R beta = r on this release (post-processing; no extra budget).
+
+        Thin convenience for ``binagg.testing.wald_test(self, R, r, ...)``; the release
+        is reused, so this spends no privacy budget beyond the original fit.
+        """
+        from binagg.testing import wald_test as _wald_test
+
+        return _wald_test(
+            self, R, r, alpha=alpha,
+            min_excess_bins=min_excess_bins, cond_threshold=cond_threshold,
+        )
+
+    def confidence_intervals(self, alpha: float = 0.05) -> np.ndarray:
+        """Asymptotic (1 - alpha) confidence intervals, computed on demand.
+
+        Returns a (d, 2) array of [lower, upper] per coefficient using the normal
+        approximation beta_hat +/- z(alpha) * se. Pure post-processing of the
+        release -- no privacy budget is spent, and any alpha may be requested.
+        """
+        z = norm.ppf(1 - alpha / 2)
+        lower = self.coefficients - z * self.standard_errors
+        upper = self.coefficients + z * self.standard_errors
+        return np.column_stack([lower, upper])
 
 
 def dp_linear_regression(
@@ -89,15 +124,12 @@ def dp_linear_regression(
     y_bounds: Tuple[float, float],
     mu: float,
     theta: float = 0.0,
-    alpha: float = 0.05,
     budget_ratios: Tuple[float, float, float, float] = (1, 3, 3, 3),
     min_count: int = 2,
     clip: bool = True,
-    return_synthetic: bool = False,
-    clip_synthetic_output: bool = False,
     preserve_sample_size: bool = True,
     random_state: Optional[int] = None,
-) -> Union[DPRegressionResult, Tuple[DPRegressionResult, "SyntheticDataResult"]]:
+) -> DPRegressionResult:
     """
     Algorithm 2: DP BinAgg for Linear Regression.
 
@@ -118,8 +150,6 @@ def dp_linear_regression(
         Total privacy budget in μ-GDP.
     theta : float, optional
         PrivTree splitting threshold. Default is 0.
-    alpha : float, optional
-        Significance level for confidence intervals. Default is 0.05 (95% CI).
     budget_ratios : tuple of float, optional
         Privacy budget ratios for (binning, count, sum_x, sum_y).
         Default is (1, 3, 3, 3).
@@ -127,13 +157,6 @@ def dp_linear_regression(
         Minimum noisy count to keep a bin. Default is 2.
     clip : bool, optional
         Whether to clip input data to bounds. Default is True.
-    return_synthetic : bool, optional
-        If True, also return synthetic data using the same privacy budget.
-        The synthetic data and regression share noise draws via Corollary 3.1.
-        Default is False.
-    clip_synthetic_output : bool, optional
-        Whether to clip synthetic output data to bounds. Only used when
-        return_synthetic=True. Default is False.
     preserve_sample_size : bool, optional
         If True (default), rescale noisy counts so the total equals the
         original sample size n. Uses largest remainder rounding.
@@ -142,10 +165,13 @@ def dp_linear_regression(
 
     Returns
     -------
-    DPRegressionResult or Tuple[DPRegressionResult, SyntheticDataResult]
-        If return_synthetic=False: DPRegressionResult with coefficient
-        estimates, standard errors, and confidence intervals.
-        If return_synthetic=True: Tuple of (DPRegressionResult, SyntheticDataResult).
+    DPRegressionResult
+        Coefficient estimates, standard errors, confidence intervals, the full
+        covariance matrix, and the private aggregates (``.aggregates``). Use
+        ``result.wald_test(R, r)`` / ``binagg.wald_test`` for hypothesis testing
+        (post-processing, no extra privacy cost). To also generate synthetic data
+        from the same shared release, use
+        ``generate_synthetic_data(..., return_regression=True)`` in binagg.synthetic.
 
     Notes
     -----
@@ -156,11 +182,6 @@ def dp_linear_regression(
         β̃ = (S̃ᵀW̃S̃ - D̃)⁻¹ S̃ᵀW̃t̃
 
     where D̃ is the bias correction matrix from Theorem 4.2.
-
-    When return_synthetic=True, the synthetic data is generated using per-sample
-    noise, and the regression aggregates are derived by summing the synthetic
-    samples. By Corollary 3.1, this yields the same distribution as adding
-    aggregate-level noise directly, so both outputs share the same privacy budget.
 
     Examples
     --------
@@ -174,75 +195,38 @@ def dp_linear_regression(
     ... )
     >>> result.coefficients.shape
     (2,)
-
-    Get both regression and synthetic data with shared budget:
-
-    >>> reg_result, syn_result = dp_linear_regression(
-    ...     X, y,
-    ...     x_bounds=[(0, 1), (0, 1)],
-    ...     y_bounds=(-2, 5),
-    ...     mu=1.0,
-    ...     return_synthetic=True
-    ... )
     """
     X = np.asarray(X)
     y = np.asarray(y).flatten()
     n_samples, n_features = X.shape
 
-    synthetic_result = None  # Will be set if return_synthetic=True
+    if clip:
+        X, y = clip_data(X, y, x_bounds, y_bounds)
 
-    if return_synthetic:
-        # Use synthetic.py to generate both synthetic data AND aggregates
-        # from the same noise (Corollary 3.1)
-        from binagg.synthetic import generate_synthetic_with_aggregates
+    y_bound = max(abs(y_bounds[0]), abs(y_bounds[1]))
+    mu_bin, mu_c, mu_s, mu_t = allocate_budget(mu, budget_ratios)
 
-        synthetic_result, priv_agg = generate_synthetic_with_aggregates(
-            X,
-            y,
-            x_bounds,
-            y_bounds,
-            mu,
-            theta=theta,
-            budget_ratios=budget_ratios,
-            min_count=min_count,
-            clip=clip,
-            clip_output=clip_synthetic_output,
-            preserve_sample_size=preserve_sample_size,
-            random_state=random_state,
-        )
-    else:
-        # Standard path: use privatize_aggregates from binning.py
-        if clip:
-            X, y = clip_data(X, y, x_bounds, y_bounds)
-
-        y_bound = max(abs(y_bounds[0]), abs(y_bounds[1]))
-        mu_bin, mu_c, mu_s, mu_t = allocate_budget(mu, budget_ratios)
-
-        bin_result = privtree_binning(
-            X, y, x_bounds, mu_bin, theta=theta, clip=False, random_state=random_state
-        )
-
-        mu_agg = np.sqrt(mu_c**2 + mu_s**2 + mu_t**2)
-        agg_ratios = (mu_c / mu_agg, mu_s / mu_agg, mu_t / mu_agg)
-
-        priv_agg = privatize_aggregates(
-            bin_result,
-            y_bound=y_bound,
-            mu_agg=mu_agg,
-            budget_ratios=agg_ratios,
-            min_count=min_count,
-            preserve_sample_size=preserve_sample_size,
-            random_state=random_state,
-        )
-
-    # Compute regression from privatized aggregates
-    regression_result = dp_regression_from_aggregates(
-        priv_agg, n_features, alpha=alpha, mu=mu, n_samples_original=n_samples
+    bin_result = privtree_binning(
+        X, y, x_bounds, mu_bin, theta=theta, clip=False, random_state=random_state
     )
 
-    if return_synthetic:
-        return regression_result, synthetic_result
-    return regression_result
+    mu_agg = np.sqrt(mu_c**2 + mu_s**2 + mu_t**2)
+    agg_ratios = (mu_c / mu_agg, mu_s / mu_agg, mu_t / mu_agg)
+
+    priv_agg = privatize_aggregates(
+        bin_result,
+        y_bound=y_bound,
+        mu_agg=mu_agg,
+        budget_ratios=agg_ratios,
+        min_count=min_count,
+        preserve_sample_size=preserve_sample_size,
+        random_state=random_state,
+    )
+
+    # Compute regression from privatized aggregates (post-processing)
+    return dp_regression_from_aggregates(
+        priv_agg, n_features, mu=mu, n_samples_original=n_samples
+    )
 
 
 def _compute_dp_wls(
@@ -369,7 +353,6 @@ def _compute_sandwich_cov(
 def dp_regression_from_aggregates(
     priv_agg: PrivatizedAggregates,
     n_features: int,
-    alpha: float = 0.05,
     mu: float = 1.0,
     n_samples_original: Optional[int] = None,
 ) -> DPRegressionResult:
@@ -385,8 +368,6 @@ def dp_regression_from_aggregates(
         Pre-computed privatized aggregates.
     n_features : int
         Number of features d.
-    alpha : float, optional
-        Significance level. Default is 0.05.
     mu : float, optional
         Privacy budget used (for reporting). Default is 1.0.
     n_samples_original : int, optional
@@ -395,7 +376,8 @@ def dp_regression_from_aggregates(
     Returns
     -------
     DPRegressionResult
-        Regression results, including the full covariance matrix.
+        Regression results, including the full covariance matrix. Confidence
+        intervals are on-demand via ``result.confidence_intervals(alpha)``.
     """
     beta_dp, beta_naive, Sigma_dp, se_naive = _compute_dp_wls(priv_agg, n_features)
 
@@ -403,11 +385,6 @@ def dp_regression_from_aggregates(
     se_dp = np.sqrt(np.maximum(np.diag(Sigma_dp), 0.0))
 
     K = priv_agg.n_bins
-    z_crit = norm.ppf(1 - alpha / 2)
-
-    ci_lower = beta_dp - z_crit * se_dp
-    ci_upper = beta_dp + z_crit * se_dp
-    confidence_intervals = np.column_stack([ci_lower, ci_upper])
 
     if n_samples_original is None:
         n_samples_original = int(np.sum(priv_agg.true_counts))
@@ -415,12 +392,11 @@ def dp_regression_from_aggregates(
     return DPRegressionResult(
         coefficients=beta_dp,
         standard_errors=se_dp,
-        confidence_intervals=confidence_intervals,
         naive_coefficients=beta_naive,
         naive_standard_errors=se_naive,
         n_bins=K,
         n_samples_original=n_samples_original,
-        alpha=alpha,
         privacy_budget=mu,
         covariance_matrix=np.asarray(Sigma_dp, dtype=float),
+        aggregates=priv_agg,
     )
