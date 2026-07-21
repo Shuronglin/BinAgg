@@ -13,6 +13,7 @@ Modules:
     privacy: GDP and (ε,δ)-DP parameter conversions
     binning: Algorithm 1 - DP Binning-Aggregation Preparation
     regression: Algorithm 2 - DP BinAgg for Linear Regression
+    testing: DP Wald hypothesis tests (post-processing; no extra privacy budget)
     synthetic: Algorithm 3 - BinAgg for Synthetic Data Generation
 """
 
@@ -35,6 +36,13 @@ from binagg.binning import (
 from binagg.regression import (
     DPRegressionResult,
     dp_linear_regression,
+)
+
+from binagg.testing import (
+    WaldTestResult,
+    make_linear_hypothesis,
+    wald_test,
+    dp_wald_test,
 )
 
 from binagg.synthetic import (
@@ -62,6 +70,11 @@ __all__ = [
     # Regression
     "DPRegressionResult",
     "dp_linear_regression",
+    # Testing
+    "WaldTestResult",
+    "make_linear_hypothesis",
+    "wald_test",
+    "dp_wald_test",
     # Synthetic
     "SyntheticDataResult",
     "generate_synthetic_data",

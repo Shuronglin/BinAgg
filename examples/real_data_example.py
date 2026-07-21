@@ -9,7 +9,7 @@ Dataset: UCI Air Quality (hourly sensor readings from an Italian city)
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from binagg import dp_linear_regression, generate_synthetic_data
+from binagg import dp_linear_regression, generate_synthetic_data, make_linear_hypothesis, wald_test
 
 np.random.seed(42)
 
@@ -123,7 +123,7 @@ print(f"Coefficients: {beta_ols}")
 # Option A: Linear Regression ONLY
 # -------------------------------------------------------------------------
 print("\n--- Option A: Linear Regression ONLY ---")
-print("Use dp_linear_regression() with return_synthetic=False (default)")
+print("Use dp_linear_regression() -- regression only (CIs/tests on demand)")
 
 result = dp_linear_regression(
     X, y,
@@ -137,20 +137,27 @@ print(f"\nCoefficients: {result.coefficients}")
 print(f"Standard errors: {result.standard_errors}")
 print(f"Privacy budget: mu = {result.privacy_budget}")
 
+# Hypothesis testing on the SAME release (post-processing, no extra privacy budget)
+names = list(feature_cols)
+R, r = make_linear_hypothesis(names, [names[0]], null_values=0.0)  # H0: first feature coef = 0
+t = result.wald_test(R, r)
+print(f"Wald test  H0: {names[0]} coef = 0  ->  p={t.pvalue:.3g}, "
+      f"{'reject' if t.reject else 'fail to reject'} (valid={t.valid})")
+
 # -------------------------------------------------------------------------
 # Option B: Linear Regression AND Synthetic Data (SAME privacy budget)
 # -------------------------------------------------------------------------
 print("\n--- Option B: Linear Regression AND Synthetic Data ---")
-print("Use dp_linear_regression() with return_synthetic=True")
+print("Use generate_synthetic_data() with return_regression=True")
 print("Both outputs share the SAME privacy budget!")
 
-reg_result, syn_result = dp_linear_regression(
+syn_result, reg_result = generate_synthetic_data(
     X, y,
     x_bounds=x_bounds,
     y_bounds=y_bounds,
     mu=1.0,
-    return_synthetic=True,
-    clip_synthetic_output=True,
+    clip_output=True,
+    return_regression=True,
     random_state=42
 )
 

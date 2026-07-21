@@ -56,7 +56,7 @@ class TestDPLinearRegression:
         result = dp_linear_regression(
             X, y, default_x_bounds_5d, default_y_bounds, mu=1.0
         )
-        assert result.confidence_intervals.shape == (5, 2)
+        assert result.confidence_intervals().shape == (5, 2)
 
     def test_ci_lower_less_than_upper(
         self, medium_regression_data, default_x_bounds_5d, default_y_bounds
@@ -66,7 +66,8 @@ class TestDPLinearRegression:
         result = dp_linear_regression(
             X, y, default_x_bounds_5d, default_y_bounds, mu=1.0
         )
-        assert np.all(result.confidence_intervals[:, 0] < result.confidence_intervals[:, 1])
+        ci = result.confidence_intervals()
+        assert np.all(ci[:, 0] < ci[:, 1])
 
     def test_standard_errors_positive(
         self, medium_regression_data, default_x_bounds_5d, default_y_bounds
@@ -139,21 +140,18 @@ class TestDPLinearRegression:
     def test_alpha_affects_ci_width(
         self, medium_regression_data, default_x_bounds_5d, default_y_bounds
     ):
-        """Test that alpha affects CI width."""
+        """Test that alpha affects CI width (on-demand, from one release)."""
         X, y, _ = medium_regression_data
 
-        result_95 = dp_linear_regression(
-            X, y, default_x_bounds_5d, default_y_bounds,
-            mu=1.0, alpha=0.05, random_state=42
+        result = dp_linear_regression(
+            X, y, default_x_bounds_5d, default_y_bounds, mu=1.0, random_state=42
         )
-        result_99 = dp_linear_regression(
-            X, y, default_x_bounds_5d, default_y_bounds,
-            mu=1.0, alpha=0.01, random_state=42
-        )
+        ci_95 = result.confidence_intervals(alpha=0.05)
+        ci_99 = result.confidence_intervals(alpha=0.01)
 
         # 99% CI should be wider than 95% CI
-        width_95 = result_95.confidence_intervals[:, 1] - result_95.confidence_intervals[:, 0]
-        width_99 = result_99.confidence_intervals[:, 1] - result_99.confidence_intervals[:, 0]
+        width_95 = ci_95[:, 1] - ci_95[:, 0]
+        width_99 = ci_99[:, 1] - ci_99[:, 0]
         assert np.all(width_99 > width_95)
 
 
@@ -212,13 +210,13 @@ class TestCoverageSimulation:
             y = np.clip(y, y_bounds[0], y_bounds[1])
 
             result = dp_linear_regression(
-                X, y, x_bounds, y_bounds, mu=2.0, alpha=alpha
+                X, y, x_bounds, y_bounds, mu=2.0
             )
+            ci = result.confidence_intervals(alpha=alpha)
 
             # Check if true coefficient is in CI
             for j in range(d):
-                if (result.confidence_intervals[j, 0] <= true_coef[j] <=
-                    result.confidence_intervals[j, 1]):
+                if ci[j, 0] <= true_coef[j] <= ci[j, 1]:
                     coverage_count[j] += 1
 
         coverage_rate = coverage_count / n_sims

@@ -13,13 +13,16 @@ Reference:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
+from typing import TYPE_CHECKING, List, Optional, Tuple, Union
 
 import numpy as np
 
 from binagg.binning import BinAggResult, PrivatizedAggregates, privtree_binning, _round_to_sum
 from binagg.privacy import allocate_budget
 from binagg.utils import clip_data
+
+if TYPE_CHECKING:
+    from binagg.regression import DPRegressionResult
 
 
 @dataclass
@@ -64,12 +67,22 @@ def generate_synthetic_data(
     clip_output: bool = False,
     preserve_sample_size: bool = True,
     random_state: Optional[int] = None,
-) -> SyntheticDataResult:
+    return_regression: bool = False,
+) -> Union[SyntheticDataResult, Tuple[SyntheticDataResult, "DPRegressionResult"]]:
     """
     Algorithm 3: BinAgg for Synthetic Data Generation.
 
     Generates differentially private synthetic data that preserves the
     joint (X, y) distribution suitable for downstream regression tasks.
+
+    This is the "superset" entry point: with ``return_regression=True`` the SAME
+    private release also yields the linear-regression estimate (and therefore
+    hypothesis testing via ``result.wald_test``), so synthetic data + estimation +
+    testing all come from one mu-GDP release (Corollary 3.1).
+
+    Privacy note: this performs a SINGLE independent mu-GDP release. It is NOT free
+    relative to a separate dp_linear_regression call -- independent releases compose
+    as sqrt(sum of squares).
 
     Parameters
     ----------
@@ -99,11 +112,19 @@ def generate_synthetic_data(
         equals the original sample size n. Uses largest remainder rounding.
     random_state : int, optional
         Random seed for reproducibility.
+    return_regression : bool, optional
+        If True, also return the DPRegressionResult computed from the SAME release
+        (shared noise, Corollary 3.1), so estimation and hypothesis testing come at
+        no additional privacy cost. Confidence intervals and Wald tests on that
+        result are on-demand (``result.confidence_intervals(alpha)`` /
+        ``result.wald_test(R, r, alpha)``). Default False.
 
     Returns
     -------
-    SyntheticDataResult
-        Contains synthetic features and labels.
+    SyntheticDataResult, or (SyntheticDataResult, DPRegressionResult) when
+    return_regression=True
+        Synthetic features and labels; optionally the shared-release regression
+        result, which supports ``.wald_test`` for hypothesis testing.
 
     Notes
     -----
@@ -132,6 +153,24 @@ def generate_synthetic_data(
     >>> result.X_synthetic.shape[1]
     2
     """
+    if return_regression:
+        # One shared release -> synthetic data AND the regression estimate
+        # (Corollary 3.1). The returned regression result supports .wald_test.
+        from binagg.regression import dp_regression_from_aggregates
+
+        X_arr = np.asarray(X)
+        synthetic_result, priv_agg = generate_synthetic_with_aggregates(
+            X, y, x_bounds, y_bounds, mu,
+            theta=theta, budget_ratios=budget_ratios, min_count=min_count,
+            clip=clip, clip_output=clip_output,
+            preserve_sample_size=preserve_sample_size, random_state=random_state,
+        )
+        regression_result = dp_regression_from_aggregates(
+            priv_agg, X_arr.shape[1], mu=mu,
+            n_samples_original=X_arr.shape[0],
+        )
+        return synthetic_result, regression_result
+
     if random_state is not None:
         np.random.seed(random_state)
 
