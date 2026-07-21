@@ -6,7 +6,6 @@ Explains privacy parameters and conversions between GDP and (eps, delta)-DP.
 """
 
 from binagg import (
-    epsilon_to_mu,
     delta_from_gdp,
     mu_from_eps_delta,
     eps_from_mu_delta,

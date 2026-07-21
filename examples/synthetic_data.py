@@ -96,11 +96,43 @@ else:
     print("Not enough synthetic samples for regression")
 
 # =============================================================================
-# Step 5: Effect of Privacy Budget
+# Step 5: DP Regression from the Same Release (return_regression=True)
 # =============================================================================
 
 print("\n" + "=" * 60)
-print("STEP 5: Effect of Privacy Budget on Synthetic Data")
+print("STEP 5: DP Regression from the Same Release")
+print("=" * 60)
+
+# generate_synthetic_data can also return the DPRegressionResult from the SAME
+# mu-GDP release (one budget). This uses BinAgg's weighted, bias-corrected
+# estimator -- NOT ordinary least squares on the synthetic records -- with
+# on-demand confidence intervals at no extra privacy cost.
+syn2, reg = generate_synthetic_data(
+    X, y, x_bounds, y_bounds,
+    mu=1.0, return_regression=True, random_state=42
+)
+
+ci = reg.confidence_intervals(alpha=0.05)
+print("\n--- Coefficients: OLS-on-synthetic vs BinAgg weighted estimator ---")
+print(f"{'Feature':<10} {'True':<10} {'OLS-on-syn':<12} {'BinAgg reg':<12} {'95% CI':<22}")
+print("-" * 68)
+for i in range(n_features):
+    if syn2.n_samples >= n_features + 1:
+        ols_syn = np.linalg.lstsq(syn2.X_synthetic, syn2.y_synthetic, rcond=None)[0][i]
+    else:
+        ols_syn = float('nan')
+    ci_str = f"[{ci[i, 0]:.3f}, {ci[i, 1]:.3f}]"
+    print(f"beta_{i:<7} {true_beta[i]:<10.3f} {ols_syn:<12.3f} {reg.coefficients[i]:<12.3f} {ci_str:<22}")
+
+print("\n(The returned regression is the weighted estimator -- both the synthetic")
+print(" data and this fit come from ONE mu=1.0 release, at no extra privacy cost.)")
+
+# =============================================================================
+# Step 6: Effect of Privacy Budget
+# =============================================================================
+
+print("\n" + "=" * 60)
+print("STEP 6: Effect of Privacy Budget on Synthetic Data")
 print("=" * 60)
 
 print(f"\n{'mu':<8} {'N Samples':<12} {'Mean(y) Err':<15} {'Std(y) Err':<15}")
